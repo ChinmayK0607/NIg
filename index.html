@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image and Text Query App</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        body, html {
+            height: 100%;
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', sans-serif;
+            background-color: #1c1c1c;
+            color: #d0d0d0;
+        }
+        .container {
+            display: flex;
+            height: 100%;
+        }
+        #editor {
+            flex: 1;
+            height: 100%;
+            border: none;
+            padding: 20px;
+            font-size: 16px;
+            resize: none;
+            background-color: #262626;
+            color: #d0d0d0;
+            line-height: 1.6;
+        }
+        #rightPanel {
+            width: 50%;
+            background-color: #303030;
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
+        #imageContainer {
+            max-width: 100%;
+            margin-bottom: 20px;
+            flex-shrink: 0;
+        }
+        #imageContainer img {
+            max-width: 100%;
+            height: auto;
+        }
+        #responseContainer {
+            background-color: #262626;
+            padding: 10px;
+            border-radius: 5px;
+            flex-grow: 1;
+            overflow-y: auto;
+        }
+        /* Modal styles */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 15%;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 300px;
+            background: rgba(30, 30, 30, 0.95);
+            backdrop-filter: blur(10px);
+            box-shadow: 0 5px 20px rgba(0,0,0,0.3);
+            border-radius: 10px;
+            z-index: 1000;
+            padding: 20px;
+        }
+        .modal button {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 10px;
+            font-size: 14px;
+            border: none;
+            border-radius: 5px;
+            background-color: #3a3f4b;
+            color: #ffffff;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        .modal button:hover {
+            background-color: #4a5160;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <textarea id="editor" placeholder="Enter your query here. Use Ctrl+K to upload an image..."></textarea>
+        <div id="rightPanel">
+            <div id="imageContainer"></div>
+            <div id="responseContainer"></div>
+        </div>
+    </div>
+
+    <!-- Modal Component -->
+    <div id="commandModal" class="modal">
+        <h2>Upload Image</h2>
+        <input type="file" id="imageInput" accept="image/*" style="display: none;" />
+        <button onclick="document.getElementById('imageInput').click()">Select Image</button>
+        <button onclick="uploadImage()">Upload Image</button>
+    </div>
+
+    <script>
+        const editor = document.getElementById('editor');
+        const imageContainer = document.getElementById('imageContainer');
+        const responseContainer = document.getElementById('responseContainer');
+        let currentImageBase64 = null;
+
+        // Add a global event listener to capture Ctrl+K
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                openModal();
+            }
+        });
+
+        function openModal() {
+            const modal = document.getElementById('commandModal');
+            modal.style.display = 'block';
+        }
+
+        function closeModal() {
+            const modal = document.getElementById('commandModal');
+            modal.style.display = 'none';
+        }
+
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                closeModal();
+            }
+        });
+
+        async function uploadImage() {
+            const imageInput = document.getElementById('imageInput');
+            const file = imageInput.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    currentImageBase64 = e.target.result;
+                    
+                    // Display the image
+                    const img = document.createElement('img');
+                    img.src = currentImageBase64;
+                    imageContainer.innerHTML = '';
+                    imageContainer.appendChild(img);
+
+                    closeModal();
+                };
+                reader.readAsDataURL(file);
+            } else {
+                console.error('No image selected');
+                responseContainer.innerText = "No image selected";
+            }
+        }
+
+        async function sendQuery(query) {
+            try {
+                let body;
+                if (currentImageBase64) {
+                    body = JSON.stringify({ 
+                        query: query,
+                        image: currentImageBase64
+                    });
+                } else {
+                    body = JSON.stringify({ query: query });
+                }
+
+                const response = await fetch('/query', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: body
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let accumulatedResponse = "";
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    const chunk = decoder.decode(value, { stream: true });
+                    accumulatedResponse += chunk;
+                    responseContainer.innerHTML = marked.parse(accumulatedResponse);
+                }
+
+                // Clear the image after query is sent
+                // currentImageBase64 = null;
+                // imageContainer.innerHTML = '';
+            } catch (error) {
+                console.error('Error processing query:', error);
+                responseContainer.innerText = "Error processing query: " + error.message;
+            }
+        }
+
+        // Function to send user input to the backend
+        async function sendUserInput() {
+            const userInput = editor.value;
+            if (userInput.trim()) {
+                await sendQuery(userInput);
+            }
+        }
+
+        // Add event listener for user input
+        editor.addEventListener('input', debounce(sendUserInput, 1000));
+
+        // Debounce function to limit the rate of API calls
+        function debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        }
+    </script>
+</body>
+</html>
