@@ -7,7 +7,7 @@ import json
 
 app = FastAPI()
 
-GROQ_API_KEY = "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"
+GROQ_API_KEY = "<YOUR API KEY>"
 
 async def stream_response(chat_completion):
     for chunk in chat_completion:
